@@ -1,2 +1,240 @@
-# AI-Study-Podcast-Creator-
+🫂from flask import Flask, request, render_template_string, jsonify, send_from_directory
+from pypdf import PdfReader
+from gtts import gTTS
+import os
+import re
+import uuid
+
+app = Flask(__name__)
+
+os.makedirs("uploads", exist_ok=True)
+os.makedirs("generated_audio", exist_ok=True)
+
+HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Study Podcast Creator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #eef2ff;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: 30px auto;
+            padding: 25px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px #ccc;
+        }
+
+        h1 {
+            text-align: center;
+            color: #4338ca;
+        }
+
+        label {
+            display: block;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            margin-top: 8px;
+            box-sizing: border-box;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            margin-top: 20px;
+            background: #4f46e5;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #3730a3;
+        }
+
+        .result {
+            margin-top: 25px;
+            padding: 15px;
+            background: #f8fafc;
+            border-radius: 10px;
+            overflow-wrap: anywhere;
+        }
+
+        audio {
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        p {
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+
+<body>
+<div class="container">
+
+    <h1>AI Study Podcast Creator</h1>
+
+    <p>Convert your course material into a study summary and podcast.</p>
+
+    <form method="POST" enctype="multipart/form-data">
+
+        <label>Enter Subject Name</label>
+        <input type="text" name="topic"
+               placeholder="Example: Data Structures" required>
+
+        <label>Upload Course PDF</label>
+        <input type="file" name="pdf"
+               accept=".pdf" required>
+
+        <button type="submit">Generate Podcast</button>
+
+    </form>
+
+    {% if error %}
+        <div class="result">
+            <h3>Error</h3>
+            <p>{{ error }}</p>
+        </div>
+    {% endif %}
+
+    {% if summary %}
+        <div class="result">
+            <h2>Study Summary</h2>
+            <p>{{ summary }}</p>
+
+            <h2>Podcast Script</h2>
+            <p>{{ script }}</p>
+
+            {% if audio_url %}
+                <h2>Podcast Audio</h2>
+                <audio controls>
+                    <source src="{{ audio_url }}" type="audio/mpeg">
+                </audio>
+
+                <p>
+                    <a href="{{ audio_url }}" download>
+                        Download Podcast Audio
+                    </a>
+                </p>
+            {% else %}
+                <p>Audio generation failed. Check your internet connection.</p>
+            {% endif %}
+        </div>
+    {% endif %}
+
+</div>
+</body>
+</html>
+"""
+
+
+def extract_text(pdf_file):
+    reader = PdfReader(pdf_file)
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def generate_summary(text):
+    sentences = re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+
+    useful_sentences = [
+        sentence.strip()
+        for sentence in sentences
+        if len(sentence.strip()) > 20
+    ]
+
+    return " ".join(useful_sentences[:6])
+
+
+def generate_podcast_script(summary, topic):
+    return (
+        f"Welcome to the AI Study Podcast. "
+        f"Today, we are learning about {topic}. "
+        f"Let's understand the important concepts. "
+        f"{summary} "
+        "For revision, remember the key concepts and review your course notes. "
+        "Thank you for listening. Keep learning and keep growing."
+    )
+
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    if request.method == "POST":
+        pdf = request.files.get("pdf")
+        topic = request.form.get("topic", "Study Material").strip()
+
+        if not pdf or not pdf.filename:
+            return render_template_string(
+                HTML, error="Please upload a PDF file."
+            )
+
+        if not pdf.filename.lower().endswith(".pdf"):
+            return render_template_string(
+                HTML, error="Only PDF files are supported."
+            )
+
+        try:
+            text = extract_text(pdf)
+        except Exception:
+            return render_template_string(
+                HTML, error="Unable to read the PDF. Please try another file."
+            )
+
+        if not text.strip():
+            return render_template_string(
+                HTML,
+                error="No readable text found. Scanned PDFs are not supported."
+            )
+
+        text = text[:12000]
+
+        summary = generate_summary(text)
+        script = generate_podcast_script(summary, topic)
+
+        audio_filename = f"podcast_{uuid.uuid4().hex}.mp3"
+        audio_path = os.path.join("generated_audio", audio_filename)
+
+        audio_url = None
+
+        try:
+            speech = gTTS(text=script, lang="en")
+            speech.save(audio_path)
+            audio_url = f"/audio/{audio_filename}"
+        except Exception:
+            pass
+
+        return render_template_string(
+            HTML,
+            summary=summary,
+            script=script,
+            audio_url=audio_url
+        )
+
+    return render_template_string(HTML)
+
+
+@app.route("/audio/<path:filename>")
+def play_audio(filename):
+    return send_from_directory("generated_audio", filename)
+
+
+if __name__ == "__main__":
+    app.run(debug=True)# AI-Study-Podcast-Creator-
 AI-powered study podcast creator using course materials.
